@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "manoj-mishra-website",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-13",
+  "assets": { "directory": "./frontend", "binding": "ASSETS" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "manoj-mishra-db", "database_id": "581cf3e9-a55e-4211-a7d8-4f608759ada7" }
+  ],
+  "observability": { "enabled": true }
+}
