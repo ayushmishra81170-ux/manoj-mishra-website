@@ -1,70 +1,29 @@
-const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
-const cors = (response) => { response.headers.set('access-control-allow-origin','*'); response.headers.set('access-control-allow-headers','Content-Type, Authorization'); response.headers.set('access-control-allow-methods','GET,POST,DELETE,OPTIONS'); return response; };
-const readJSON = async (request) => { try { return await request.json(); } catch { return {}; } };
-const auth = (request, env) => {
-  const value = request.headers.get('authorization') || '';
-  if (!value.startsWith('Bearer ')) return false;
-  return value.slice(7) === env.ADMIN_PASSWORD;
-};
-const protectedRoute = (request, env) => auth(request, env) ? null : cors(json({ error: 'Login required' }, 401));
-
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }));
-    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
-
-    try {
-      if (url.pathname === '/api/health') return cors(json({ ok: true }));
-
-      if (url.pathname === '/api/admin/login' && request.method === 'POST') {
-        const body = await readJSON(request);
-        if (body.username === 'admin' && env.ADMIN_PASSWORD && body.password === env.ADMIN_PASSWORD) {
-          return cors(json({ access_token: env.ADMIN_PASSWORD }));
-        }
-        return cors(json({ error: 'Invalid credentials' }, 401));
-      }
-
-      if (url.pathname === '/api/profile' && request.method === 'GET') {
-        const row = await env.DB.prepare('SELECT * FROM profile WHERE id=1').first();
-        return cors(json(row || { id: 1, name: 'मनोज मिश्रा' }));
-      }
-      if (url.pathname === '/api/profile' && request.method === 'POST') {
-        const denied = protectedRoute(request, env); if (denied) return denied;
-        const b = await readJSON(request);
-        await env.DB.prepare(`INSERT INTO profile (id,name,designation,district,bio_hi,bio_en,facebook,instagram,x,youtube,updated_at)
-          VALUES (1,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-          ON CONFLICT(id) DO UPDATE SET name=excluded.name,designation=excluded.designation,district=excluded.district,bio_hi=excluded.bio_hi,bio_en=excluded.bio_en,facebook=excluded.facebook,instagram=excluded.instagram,x=excluded.x,youtube=excluded.youtube,updated_at=CURRENT_TIMESTAMP`)
-          .bind(b.name||'',b.designation||'',b.district||'',b.bio_hi||'',b.bio_en||'',b.facebook||'',b.instagram||'',b.x||'',b.youtube||'').run();
-        return cors(json({ ok: true }));
-      }
-
-      if (url.pathname === '/api/posts' && request.method === 'GET') {
-        const r = await env.DB.prepare('SELECT * FROM posts WHERE published=1 ORDER BY id DESC').all();
-        return cors(json(r.results));
-      }
-      if (url.pathname === '/api/posts' && request.method === 'POST') {
-        const denied = protectedRoute(request, env); if (denied) return denied;
-        const b = await readJSON(request);
-        const r = await env.DB.prepare('INSERT INTO posts(title_hi,title_en,body_hi,body_en,type,published) VALUES(?,?,?,?,?,1) RETURNING *').bind(b.title_hi||'',b.title_en||'',b.body_hi||'',b.body_en||'',b.type||'News').first();
-        return cors(json(r));
-      }
-      const postDelete = url.pathname.match(/^\/api\/posts\/(\d+)$/);
-      if (postDelete && request.method === 'DELETE') { const denied = protectedRoute(request, env); if (denied) return denied; await env.DB.prepare('DELETE FROM posts WHERE id=?').bind(postDelete[1]).run(); return cors(json({ok:true})); }
-
-      if (url.pathname === '/api/career' && request.method === 'GET') { const r = await env.DB.prepare('SELECT * FROM activities ORDER BY id DESC').all(); return cors(json(r.results)); }
-      if (url.pathname === '/api/career' && request.method === 'POST') { const denied=protectedRoute(request,env); if(denied)return denied; const b=await readJSON(request); const r=await env.DB.prepare('INSERT INTO activities(year,title_hi,title_en,description_hi,description_en) VALUES(?,?,?,?,?) RETURNING *').bind(b.year||'',b.title_hi||'',b.title_en||'',b.description_hi||'',b.description_en||'').first(); return cors(json(r)); }
-      const careerDelete=url.pathname.match(/^\/api\/career\/(\d+)$/); if(careerDelete&&request.method==='DELETE'){const denied=protectedRoute(request,env);if(denied)return denied;await env.DB.prepare('DELETE FROM activities WHERE id=?').bind(careerDelete[1]).run();return cors(json({ok:true}));}
-
-      if (url.pathname === '/api/gallery' && request.method === 'GET') { const r=await env.DB.prepare('SELECT id,title,image_url AS image,category,created_at FROM gallery ORDER BY id DESC').all(); return cors(json(r.results)); }
-      if (url.pathname === '/api/gallery' && request.method === 'POST') { const denied=protectedRoute(request,env);if(denied)return denied; const b=await readJSON(request); const r=await env.DB.prepare('INSERT INTO gallery(title,image_url,category) VALUES(?,?,?) RETURNING id,title,image_url AS image,category').bind(b.title||'',b.image_url||'',b.category||'').first(); return cors(json(r)); }
-      const galleryDelete=url.pathname.match(/^\/api\/gallery\/(\d+)$/); if(galleryDelete&&request.method==='DELETE'){const denied=protectedRoute(request,env);if(denied)return denied;await env.DB.prepare('DELETE FROM gallery WHERE id=?').bind(galleryDelete[1]).run();return cors(json({ok:true}));}
-
-      if (url.pathname === '/api/contact' && request.method === 'POST') { const b=await readJSON(request); await env.DB.prepare('INSERT INTO contact_messages(name,email,message) VALUES(?,?,?)').bind(b.name||'',b.email||'',b.message||'').run(); return cors(json({ok:true})); }
-      if (url.pathname === '/api/contacts' && request.method === 'GET') { const denied=protectedRoute(request,env);if(denied)return denied; const r=await env.DB.prepare('SELECT * FROM contact_messages ORDER BY id DESC').all(); return cors(json(r.results)); }
-      const contactDelete=url.pathname.match(/^\/api\/contacts\/(\d+)$/); if(contactDelete&&request.method==='DELETE'){const denied=protectedRoute(request,env);if(denied)return denied;await env.DB.prepare('DELETE FROM contact_messages WHERE id=?').bind(contactDelete[1]).run();return cors(json({ok:true}));}
-
-      return cors(json({ error: 'Not found' }, 404));
-    } catch (e) { return cors(json({ error: e.message || 'Server error' }, 500)); }
-  }
-};
+const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8'}});
+const cors=r=>{r.headers.set('access-control-allow-origin','*');r.headers.set('access-control-allow-headers','Content-Type, Authorization');r.headers.set('access-control-allow-methods','GET,POST,DELETE,OPTIONS');return r};
+const readJSON=async r=>{try{return await r.json()}catch{return {}}};
+const enc=new TextEncoder();
+const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const unb64=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(s.length/4)*4,'=')),c=>c.charCodeAt(0));
+async function key(secret,usage){return crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,usage)}
+async function makeToken(secret){const p=b64(enc.encode(JSON.stringify({u:'admin',exp:Math.floor(Date.now()/1000)+86400})));const k=await key(secret,['sign']);const s=b64(await crypto.subtle.sign('HMAC',k,enc.encode(p)));return p+'.'+s}
+async function validToken(token,secret){try{const [p,s]=token.split('.');if(!p||!s)return false;const k=await key(secret,['verify']);if(!(await crypto.subtle.verify('HMAC',k,unb64(s),enc.encode(p))))return false;const d=JSON.parse(new TextDecoder().decode(unb64(p)));return d.u==='admin'&&d.exp>Math.floor(Date.now()/1000)}catch{return false}}
+const auth=async(r,e)=>{const a=r.headers.get('authorization')||'';return a.startsWith('Bearer ')&&e.ADMIN_PASSWORD?validToken(a.slice(7),e.ADMIN_PASSWORD):false};
+const guard=async(r,e)=>await auth(r,e)?null:cors(json({error:'Login required'},401));
+export default{async fetch(request,env){const u=new URL(request.url);if(request.method==='OPTIONS')return cors(new Response(null,{status:204}));if(!u.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);try{
+if(u.pathname==='/api/health')return cors(json({ok:true}));
+if(u.pathname==='/api/admin/login'&&request.method==='POST'){const b=await readJSON(request);if(b.username==='admin'&&env.ADMIN_PASSWORD&&b.password===env.ADMIN_PASSWORD)return cors(json({access_token:await makeToken(env.ADMIN_PASSWORD)}));return cors(json({error:'Invalid credentials'},401))}
+if(u.pathname==='/api/profile'&&request.method==='GET'){const r=await env.DB.prepare('SELECT * FROM profile WHERE id=1').first();return cors(json(r||{id:1,name:'मनोज मिश्रा'}))}
+if(u.pathname==='/api/profile'&&request.method==='POST'){const d=await guard(request,env);if(d)return d;const b=await readJSON(request);await env.DB.prepare(`INSERT INTO profile(id,name,designation,district,bio_hi,bio_en,facebook,instagram,x,youtube,updated_at) VALUES(1,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,designation=excluded.designation,district=excluded.district,bio_hi=excluded.bio_hi,bio_en=excluded.bio_en,facebook=excluded.facebook,instagram=excluded.instagram,x=excluded.x,youtube=excluded.youtube,updated_at=CURRENT_TIMESTAMP`).bind(b.name||'',b.designation||'',b.district||'',b.bio_hi||'',b.bio_en||'',b.facebook||'',b.instagram||'',b.x||'',b.youtube||'').run();return cors(json({ok:true}))}
+if(u.pathname==='/api/posts'&&request.method==='GET'){const r=await env.DB.prepare('SELECT * FROM posts WHERE published=1 ORDER BY id DESC').all();return cors(json(r.results))}
+if(u.pathname==='/api/posts'&&request.method==='POST'){const d=await guard(request,env);if(d)return d;const b=await readJSON(request);const r=await env.DB.prepare('INSERT INTO posts(title_hi,title_en,body_hi,body_en,type,published) VALUES(?,?,?,?,?,1) RETURNING *').bind(b.title_hi||'',b.title_en||'',b.body_hi||'',b.body_en||'',b.type||'News').first();return cors(json(r))}
+const pd=u.pathname.match(/^\/api\/posts\/(\d+)$/);if(pd&&request.method==='DELETE'){const d=await guard(request,env);if(d)return d;await env.DB.prepare('DELETE FROM posts WHERE id=?').bind(pd[1]).run();return cors(json({ok:true}))}
+if(u.pathname==='/api/career'&&request.method==='GET'){const r=await env.DB.prepare('SELECT * FROM activities ORDER BY id DESC').all();return cors(json(r.results))}
+if(u.pathname==='/api/career'&&request.method==='POST'){const d=await guard(request,env);if(d)return d;const b=await readJSON(request);const r=await env.DB.prepare('INSERT INTO activities(year,title_hi,title_en,description_hi,description_en) VALUES(?,?,?,?,?) RETURNING *').bind(b.year||'',b.title_hi||'',b.title_en||'',b.description_hi||'',b.description_en||'').first();return cors(json(r))}
+const cd=u.pathname.match(/^\/api\/career\/(\d+)$/);if(cd&&request.method==='DELETE'){const d=await guard(request,env);if(d)return d;await env.DB.prepare('DELETE FROM activities WHERE id=?').bind(cd[1]).run();return cors(json({ok:true}))}
+if(u.pathname==='/api/gallery'&&request.method==='GET'){const r=await env.DB.prepare('SELECT id,title,image_url AS image,category,created_at FROM gallery ORDER BY id DESC').all();return cors(json(r.results))}
+if(u.pathname==='/api/gallery'&&request.method==='POST'){const d=await guard(request,env);if(d)return d;const b=await readJSON(request);const r=await env.DB.prepare('INSERT INTO gallery(title,image_url,category) VALUES(?,?,?) RETURNING id,title,image_url AS image,category').bind(b.title||'',b.image_url||'',b.category||'').first();return cors(json(r))}
+const gd=u.pathname.match(/^\/api\/gallery\/(\d+)$/);if(gd&&request.method==='DELETE'){const d=await guard(request,env);if(d)return d;await env.DB.prepare('DELETE FROM gallery WHERE id=?').bind(gd[1]).run();return cors(json({ok:true}))}
+if(u.pathname==='/api/contact'&&request.method==='POST'){const b=await readJSON(request);await env.DB.prepare('INSERT INTO contact_messages(name,email,message) VALUES(?,?,?)').bind(b.name||'',b.email||'',b.message||'').run();return cors(json({ok:true}))}
+if(u.pathname==='/api/contacts'&&request.method==='GET'){const d=await guard(request,env);if(d)return d;const r=await env.DB.prepare('SELECT * FROM contact_messages ORDER BY id DESC').all();return cors(json(r.results))}
+const mc=u.pathname.match(/^\/api\/contacts\/(\d+)$/);if(mc&&request.method==='DELETE'){const d=await guard(request,env);if(d)return d;await env.DB.prepare('DELETE FROM contact_messages WHERE id=?').bind(mc[1]).run();return cors(json({ok:true}))}
+return cors(json({error:'Not found'},404))}catch(e){return cors(json({error:e.message||'Server error'},500))}}};
